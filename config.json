@@ -1,0 +1,28 @@
+{
+  "columns_mapper": [
+    {
+      "source_col_name": "APC",
+      "new_name": "apc"
+    },
+    {
+      "source_col_name": "Group Title",
+      "new_name": "group_title"
+    },
+    {
+      "source_col_name": "SI",
+      "new_name": "si"
+    },
+    {
+      "source_col_name": "Payment Rate",
+      "new_name": "payment_rate"
+    },
+    {
+      "source_col_name": "Minimum Unadjusted Copayment",
+      "new_name": "min_unadjusted_copay"
+    },
+    {
+      "source_col_name": "Adjusted Beneficiary Copayment",
+      "new_name": "adj_benefi_copay"
+    }
+  ]
+}
