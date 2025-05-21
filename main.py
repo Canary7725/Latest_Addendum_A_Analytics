@@ -47,9 +47,12 @@ def build_schema(columns_mapper):
 
 def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
     if use_xlsx:
-        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][1]
+        file_name = next((f for f in os.listdir('.') if f.endswith('.xlsx')), None)
     else:
-        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][0]
+        file_name = next((f for f in os.listdir('.') if f.endswith('.csv')), None)
+
+    if file_name is None:
+        raise FileNotFoundError("No matching .xlsx or .csv file found.")
 
     print("reading file name",file_name)
     usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
