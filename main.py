@@ -17,7 +17,7 @@ def load_config():
 
 def build_schema(columns_mapper):
     conversion_dict = {
-        item.get("source_col_name") or item.get("name"): item["new_name"]
+        item.get("source_col_name") : item["new_name"]
         for item in columns_mapper
     }
       
@@ -46,12 +46,16 @@ def build_schema(columns_mapper):
     return conversion_dict, spark_schema_original, spark_schema_final, pandas_schema
 
 def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
-    file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][0]
+    if use_xlsx:
+        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][1]
+    else:
+        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][0]
+
     print("reading file name",file_name)
     usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
 
-    if use_xlsx and file_name.endswith('.xlsx'):
-        df = pd.read_excel(file_name, usecols=usecols, dtype=str)
+    if use_xlsx:
+        df = pd.read_excel(file_name, usecols=usecols, dtype=str,skiprows=2)
     else:
         df = pd.read_csv(file_name, usecols=usecols, encoding='latin1', skiprows=2, dtype=str)
 
@@ -128,7 +132,7 @@ def test_dataframe(df):
     print("All tests passed!")
 
 def main():
-    use_xlsx=False
+    use_xlsx=True
     try:
         download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
         columns_mapper = load_config()
