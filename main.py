@@ -71,7 +71,6 @@ def clean_pandas_df(df):
     numeric_cols = ["Payment Rate","Minimum Unadjusted Copayment", "Adjusted Beneficiary Copayment"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-        # df[col] = df[col].apply(lambda x: decimal.Decimal(f'{x:.2f}') if pd.notnull(x) else None) # For float types // Convert to numeric and 2 decimal palces
     return df
 
 def create_spark_dataframe(spark,spark_schema_original,pandas_df):
@@ -116,13 +115,11 @@ def test_dataframe(df):
     )
     assert payment_check.count() == 0, "Payment Rate does not have 3 decimal places"
 
-    # Min unadjusted copay 2 decimals
     min_copay_check = df.filter(
         ~col("min_unadjusted_copay").cast(StringType()).rlike(r"^\d+(\.\d{2})?$")
     )
     assert min_copay_check.count() == 0, "Minimum Unadjusted Copayment does not have 2 decimal places"
 
-    # Adjusted beneficiary copay 2 decimals
     adj_copay_check = df.filter(
         ~col("adj_benefi_copay").cast(StringType()).rlike(r"^\d+(\.\d{2})?$")
     )

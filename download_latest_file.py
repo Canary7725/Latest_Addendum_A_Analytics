@@ -12,8 +12,7 @@ def get_latest_addendum_a_href(url):
     with urllib.request.urlopen(url) as response:
         html = response.read().decode("utf-8")
 
-    # Find all <tr> blocks
-    tr_pattern = re.compile(r'<tr[^>]*>.*?</tr>', re.DOTALL | re.IGNORECASE)
+    tr_pattern = re.compile(r'<tr[^>]*>.*?</tr>', re.DOTALL | re.IGNORECASE)  # Find all <tr> blocks
     tr_blocks = tr_pattern.findall(html)
 
     latest_date = None
@@ -24,11 +23,9 @@ def get_latest_addendum_a_href(url):
     month_year_pattern = re.compile(r'\b(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{4}', re.IGNORECASE)
 
     for tr in tr_blocks:
-        # Only proceed if this row contains "Addendum A"
-        if "Addendum A" not in tr:
+        if "Addendum A" not in tr:  # Only proceed if this row contains "Addendum A"
             continue
 
-        # Extract the first <a> tag inside the row
         a_match = a_tag_pattern.search(tr)
         if a_match:
             href = a_match.group(1)
@@ -60,7 +57,7 @@ def download_file_from_url_and_extract(url):
 
     assert match is not None, "No ZIP path found in the HTML."
 
-    zip_path = match.group(1)  # e.g. /files/zip/april-2025-opps-addendum.zip
+    zip_path = match.group(1)
     direct_url = urljoin(url, zip_path)
     filename = os.path.basename(zip_path)
     urllib.request.urlretrieve(direct_url, filename)
@@ -77,7 +74,6 @@ def download_file_from_url_and_extract(url):
             for extracted_file in extracted_files:
                 original_path = os.path.join("./", extracted_file)
 
-                # Skip directories
                 if os.path.isfile(original_path):
                     ext = os.path.splitext(extracted_file)[1].lower()
                     if ext in [".csv", ".xlsx"]:
