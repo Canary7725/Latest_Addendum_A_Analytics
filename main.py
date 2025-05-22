@@ -84,6 +84,7 @@ def clean_pandas_df(df):
         df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
+
 def create_spark_dataframe(spark,spark_schema_original,pandas_df):
     return spark.createDataFrame(pandas_df, schema=spark_schema_original)
 
@@ -155,7 +156,6 @@ def main():
             df_renamed=load_and_rename(spark,'./initial_parquet',conversion_dict,spark_schema_final)
             save_final_parquet(df_renamed)
             final_df=read_final_parquet(spark,'./final_parquet')
-
             test_dataframe(final_df)
     except Exception as e:
         print(e)  
