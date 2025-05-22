@@ -12,7 +12,7 @@ from download_latest_file import download_file_from_url_and_extract
 
 def load_config():
     with open('./config.json') as config:
-        return json.load(config)['columns_mapper']
+        return json.load(config)
     
 
 def build_schema(columns_mapper):
@@ -139,7 +139,7 @@ def main():
     try:
         download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
         columns_mapper = load_config()
-        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(columns_mapper)
+        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(columns_mapper['columns_mapper'])
 
         pandas_df=read_pandas_df(pandas_schema,conversion_dict,use_xlsx)
 
