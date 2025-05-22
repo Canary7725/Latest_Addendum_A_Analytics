@@ -25,6 +25,7 @@ def build_schema(columns_mapper):
           StructField(col,StringType(),True)
           for col in conversion_dict.keys()
     ])
+    #REVIEW: no need to use original schema
 
     spark_schema_final = StructType([
         StructField("apc", StringType(), True),
@@ -43,6 +44,9 @@ def build_schema(columns_mapper):
         "Minimum Unadjusted Copayment": "float",
         "Adjusted Beneficiary Copayment": "float"
     }
+    # REVIEW: you can use a key named 'data_type' in the config json and use that to for schema in pandas, no need to define separate schema here
+    # code line will be optimized that way
+
     return conversion_dict, spark_schema_original, spark_schema_final, pandas_schema
 
 def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
@@ -136,8 +140,10 @@ def test_dataframe(df):
 
 def main():
     use_xlsx=True
+    #REVIEW: usage of file as xls or csv should be passed as param to main while calling the py file
     try:
         download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
+        # REVIEW:use the url in the config 
         columns_mapper = load_config()
         conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(columns_mapper['columns_mapper'])
 
