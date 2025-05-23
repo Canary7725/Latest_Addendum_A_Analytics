@@ -2,27 +2,34 @@
   "columns_mapper": [
     {
       "source_col_name": "APC",
-      "new_name": "apc"
+      "new_name": "apc",
+      "data_type":"string"
     },
     {
       "source_col_name": "Group Title",
-      "new_name": "group_title"
+      "new_name": "group_title",
+      "data_type":"string"
     },
     {
       "source_col_name": "SI",
-      "new_name": "si"
+      "new_name": "si",
+      "data_type":"string"
     },
     {
       "source_col_name": "Payment Rate",
-      "new_name": "payment_rate"
+      "new_name": "payment_rate",
+      "data_type":"float"
     },
     {
       "source_col_name": "Minimum Unadjusted Copayment",
-      "new_name": "min_unadjusted_copay"
+      "new_name": "min_unadjusted_copay",
+      "data_type":"float"
     },
     {
       "source_col_name": "Adjusted Beneficiary Copayment",
-      "new_name": "adj_benefi_copay"
+      "new_name": "adj_benefi_copay",
+      "data_type":"float"
     }
-  ]
+  ],
+  "url":"https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates"
 }
