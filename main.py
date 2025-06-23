@@ -5,7 +5,7 @@ import sys
 import pandas as pd
 from pyspark.sql.types import *
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col,when
 from download_latest_file import download_file_from_url_and_extract
 
 
@@ -15,7 +15,6 @@ def load_config():
     with open('./config.json') as config:
         return json.load(config)
     
-
 def build_schema(columns_mapper):
     conversion_dict = {
         item.get("source_col_name") : item["new_name"]
@@ -54,7 +53,7 @@ def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
         raise FileNotFoundError("No matching .xlsx or .csv file found.")
 
     print("reading file name",file_name)
-    usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
+    usecols = list(pandas_schema.keys()) # Only use cols specified in the pandas_schema
 
     if use_xlsx:
         df = pd.read_excel(file_name, usecols=usecols, dtype=str,skiprows=2)
@@ -99,8 +98,12 @@ def load_and_rename(spark, input_path, conversion_dict, final_schema):
         col_name = field.name
         data_type = field.dataType
         if col_name in df.columns:
-            df = df.withColumn(col_name, col(col_name).cast(data_type))
-    
+            df = df.withColumn(
+                col_name,
+                when((col(col_name) == 'NaN') | (col(col_name) == ''), None)
+                .otherwise(col(col_name))
+                .cast(data_type)
+            )
     return df
 
 def save_final_parquet(df):
