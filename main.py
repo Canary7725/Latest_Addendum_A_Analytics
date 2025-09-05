@@ -1,10 +1,11 @@
 import decimal
 import json
 import os
+import sys
 import pandas as pd
 from pyspark.sql.types import *
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql.functions import col,when
 from download_latest_file import download_file_from_url_and_extract
 
 
@@ -14,7 +15,6 @@ def load_config():
     with open('./config.json') as config:
         return json.load(config)
     
-
 def build_schema(columns_mapper):
     conversion_dict = {
         item.get("source_col_name") : item["new_name"]
@@ -35,18 +35,12 @@ def build_schema(columns_mapper):
         StructField("min_unadjusted_copay", DecimalType(10, 2), True),
         StructField("adj_benefi_copay", DecimalType(10, 2), True),
     ])
-      
-    pandas_schema = {
-        "APC": "string",
-        "Group Title": "string",
-        "SI": "string",
-        "Payment Rate": "float",
-        "Minimum Unadjusted Copayment": "float",
-        "Adjusted Beneficiary Copayment": "float"
-    }
-    # REVIEW: you can use a key named 'data_type' in the config json and use that to for schema in pandas, no need to define separate schema here
-    # code line will be optimized that way
+    
 
+    pandas_schema = {
+        item["source_col_name"]: item["data_type"]
+        for item in columns_mapper
+    }
     return conversion_dict, spark_schema_original, spark_schema_final, pandas_schema
 
 def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
@@ -59,7 +53,7 @@ def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
         raise FileNotFoundError("No matching .xlsx or .csv file found.")
 
     print("reading file name",file_name)
-    usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
+    usecols = list(pandas_schema.keys()) # Only use cols specified in the pandas_schema
 
     if use_xlsx:
         df = pd.read_excel(file_name, usecols=usecols, dtype=str,skiprows=2)
@@ -84,6 +78,7 @@ def clean_pandas_df(df):
         df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
+
 def create_spark_dataframe(spark,spark_schema_original,pandas_df):
     return spark.createDataFrame(pandas_df, schema=spark_schema_original)
 
@@ -95,18 +90,20 @@ def save_original_parquet(df):
 
 def load_and_rename(spark, input_path, conversion_dict, final_schema):
     df = spark.read.parquet(input_path)    
-    # Rename columns using conversion_dict values (new column names)
     for old_col, new_col in conversion_dict.items():
         if old_col in df.columns:
             df = df.withColumnRenamed(old_col, new_col)
     
-    # Convert data types as per final schema
     for field in final_schema.fields:
         col_name = field.name
         data_type = field.dataType
         if col_name in df.columns:
-            df = df.withColumn(col_name, col(col_name).cast(data_type))
-    
+            df = df.withColumn(
+                col_name,
+                when((col(col_name) == 'NaN') | (col(col_name) == ''), None)
+                .otherwise(col(col_name))
+                .cast(data_type)
+            )
     return df
 
 def save_final_parquet(df):
@@ -138,14 +135,11 @@ def test_dataframe(df):
 
     print("All tests passed!")
 
-def main():
-    use_xlsx=True
-    #REVIEW: usage of file as xls or csv should be passed as param to main while calling the py file
+def main(use_xlsx):
     try:
-        download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
-        # REVIEW:use the url in the config 
-        columns_mapper = load_config()
-        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(columns_mapper['columns_mapper'])
+        config = load_config()
+        download_file_from_url_and_extract(config['url'],use_xlsx)
+        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(config['columns_mapper'])
 
         pandas_df=read_pandas_df(pandas_schema,conversion_dict,use_xlsx)
 
@@ -155,14 +149,22 @@ def main():
             df_renamed=load_and_rename(spark,'./initial_parquet',conversion_dict,spark_schema_final)
             save_final_parquet(df_renamed)
             final_df=read_final_parquet(spark,'./final_parquet')
-
             test_dataframe(final_df)
     except Exception as e:
         print(e)  
     finally:      
-        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')]
-        for file in file_name:
-            os.remove(file)
+        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')][0]
+        os.remove(file_name)
+
+def cli():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run script using Excel or CSV file")
+    parser.add_argument("--usexlsx", action="store_true", help="Use Excel file instead of CSV")
+    args = parser.parse_args()
+
+    use_xlsx = args.usexlsx
+    sys.exit(main(use_xlsx))
 
 if __name__ == "__main__":
-    main()
+    cli()
