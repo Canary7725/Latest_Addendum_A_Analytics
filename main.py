@@ -3,6 +3,7 @@ import json
 import os
 import pandas as pd
 from pyspark.sql.types import *
+from pyspark.sql import types as spark_types
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col
 from download_latest_file import download_file_from_url_and_extract
@@ -20,36 +21,52 @@ def build_schema(columns_mapper):
         item.get("source_col_name") : item["new_name"]
         for item in columns_mapper
     }
-      
-    spark_schema_original=StructType([
-          StructField(col,StringType(),True)
-          for col in conversion_dict.keys()
+
+    def build_spark_type(column_config, type_key):
+        type_name = column_config[type_key]
+        spark_type = getattr(spark_types, type_name)
+        if type_name == "DecimalType":
+            return spark_type(
+                column_config["precision"], column_config["scale"])
+        return spark_type()
+
+    spark_schema_original = StructType([
+        StructField(
+            item["source_col_name"],
+            build_spark_type(item, "input_spark_type"),
+            True,
+        )
+        for item in columns_mapper
     ])
-    #REVIEW: no need to use original schema
 
     spark_schema_final = StructType([
-        StructField("apc", StringType(), True),
-        StructField("group_title", StringType(), True),
-        StructField("si", StringType(), True),
-        StructField("payment_rate", DecimalType(10, 3), True),
-        StructField("min_unadjusted_copay", DecimalType(10, 2), True),
-        StructField("adj_benefi_copay", DecimalType(10, 2), True),
+        StructField(
+            item["new_name"],
+            build_spark_type(item, "spark_type"),
+            True,
+        )
+        for item in columns_mapper
     ])
-      
+
     pandas_schema = {
-        "APC": "string",
-        "Group Title": "string",
-        "SI": "string",
-        "Payment Rate": "float",
-        "Minimum Unadjusted Copayment": "float",
-        "Adjusted Beneficiary Copayment": "float"
+        item["source_col_name"]: item["pandas_dtype"]
+        for item in columns_mapper
     }
-    # REVIEW: you can use a key named 'data_type' in the config json and use that to for schema in pandas, no need to define separate schema here
-    # code line will be optimized that way
+    numeric_columns = [
+        item["source_col_name"]
+        for item in columns_mapper
+        if item.get("clean_as_numeric", False)
+    ]
 
-    return conversion_dict, spark_schema_original, spark_schema_final, pandas_schema
+    return (
+        conversion_dict,
+        spark_schema_original,
+        spark_schema_final,
+        pandas_schema,
+        numeric_columns,
+    )
 
-def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
+def read_pandas_df(pandas_schema, numeric_columns, conversion_dict, use_xlsx):
     if use_xlsx:
         file_name = next((f for f in os.listdir('.') if f.endswith('.xlsx')), None)
     else:
@@ -62,16 +79,16 @@ def read_pandas_df(pandas_schema,conversion_dict,use_xlsx):
     usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
 
     if use_xlsx:
-        df = pd.read_excel(file_name, usecols=usecols, dtype=str,skiprows=2)
+        df = pd.read_excel(file_name, usecols=usecols, dtype=pandas_schema,skiprows=2)
     else:
-        df = pd.read_csv(file_name, usecols=usecols, encoding='latin1', skiprows=2, dtype=str)
+        df = pd.read_csv(file_name, usecols=usecols, encoding='latin1', skiprows=2, dtype=pandas_schema)
 
-    df = clean_pandas_df(df)
+    df = clean_pandas_df(df, numeric_columns)
     df.rename(columns=conversion_dict,inplace=True)
     return df
 
 
-def clean_pandas_df(df):
+def clean_pandas_df(df, numeric_columns):
     df = df.fillna('')
 
     for col in df.columns:
@@ -79,8 +96,7 @@ def clean_pandas_df(df):
 
     df['APC'] = df['APC'].apply(lambda x: x.zfill(4)) #append 3 digits apc code to 4 digits
 
-    numeric_cols = ["Payment Rate","Minimum Unadjusted Copayment", "Adjusted Beneficiary Copayment"]
-    for col in numeric_cols:
+    for col in numeric_columns:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     return df
 
@@ -145,9 +161,9 @@ def main():
         download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
         # REVIEW:use the url in the config 
         columns_mapper = load_config()
-        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema = build_schema(columns_mapper['columns_mapper'])
+        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema, numeric_columns = build_schema(columns_mapper['columns_mapper'])
 
-        pandas_df=read_pandas_df(pandas_schema,conversion_dict,use_xlsx)
+        pandas_df=read_pandas_df(pandas_schema,numeric_columns,conversion_dict,use_xlsx)
 
         with SparkSession.builder.appName('Addendum A Analytics').getOrCreate() as spark:
             spark_df=create_spark_dataframe(spark,spark_schema_original,pandas_df)
