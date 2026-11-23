@@ -1,37 +1,39 @@
-import decimal
 import json
 import os
+import shutil
+
 import pandas as pd
-from pyspark.sql.types import *
-from pyspark.sql import types as spark_types
 from pyspark.sql import SparkSession
-from pyspark.sql.functions import col
+from pyspark.sql import functions as F
+from pyspark.sql import types as spark_types
+
 from download_latest_file import download_file_from_url_and_extract
 
 
+def load_config(config_path="config.json"):
+    with open(config_path, encoding="utf-8") as config_file:
+        return json.load(config_file)
 
-
-def load_config():
-    with open('./config.json') as config:
-        return json.load(config)
-    
 
 def build_schema(columns_mapper):
     conversion_dict = {
-        item.get("source_col_name") : item["new_name"]
+        item["source_col_name"]: item["new_name"]
         for item in columns_mapper
     }
 
     def build_spark_type(column_config, type_key):
         type_name = column_config[type_key]
         spark_type = getattr(spark_types, type_name)
+
         if type_name == "DecimalType":
             return spark_type(
-                column_config["precision"], column_config["scale"])
+                column_config["precision"], column_config["scale"]
+            )
+
         return spark_type()
 
-    spark_schema_original = StructType([
-        StructField(
+    original_schema = spark_types.StructType([
+        spark_types.StructField(
             item["source_col_name"],
             build_spark_type(item, "input_spark_type"),
             True,
@@ -39,8 +41,8 @@ def build_schema(columns_mapper):
         for item in columns_mapper
     ])
 
-    spark_schema_final = StructType([
-        StructField(
+    final_schema = spark_types.StructType([
+        spark_types.StructField(
             item["new_name"],
             build_spark_type(item, "spark_type"),
             True,
@@ -60,125 +62,180 @@ def build_schema(columns_mapper):
 
     return (
         conversion_dict,
-        spark_schema_original,
-        spark_schema_final,
+        original_schema,
+        final_schema,
         pandas_schema,
         numeric_columns,
     )
 
-def read_pandas_df(pandas_schema, numeric_columns, conversion_dict, use_xlsx):
+
+def read_pandas_df(
+    file_path,
+    pandas_schema,
+    numeric_columns,
+    conversion_dict,
+    use_xlsx,
+    skip_rows,
+):
+    print(f"Reading file: {file_path}")
+    usecols = list(pandas_schema.keys())
+
     if use_xlsx:
-        file_name = next((f for f in os.listdir('.') if f.endswith('.xlsx')), None)
+        df = pd.read_excel(
+            file_path,
+            usecols=usecols,
+            dtype=pandas_schema,
+            skiprows=skip_rows,
+        )
     else:
-        file_name = next((f for f in os.listdir('.') if f.endswith('.csv')), None)
-
-    if file_name is None:
-        raise FileNotFoundError("No matching .xlsx or .csv file found.")
-
-    print("reading file name",file_name)
-    usecols = list(pandas_schema.keys()) #Only use cols specified in the pandas_schema
-
-    if use_xlsx:
-        df = pd.read_excel(file_name, usecols=usecols, dtype=pandas_schema,skiprows=2)
-    else:
-        df = pd.read_csv(file_name, usecols=usecols, encoding='latin1', skiprows=2, dtype=pandas_schema)
+        df = pd.read_csv(
+            file_path,
+            usecols=usecols,
+            encoding="latin1",
+            skiprows=skip_rows,
+            dtype=pandas_schema,
+        )
 
     df = clean_pandas_df(df, numeric_columns)
-    df.rename(columns=conversion_dict,inplace=True)
+    df.rename(columns=conversion_dict, inplace=True)
     return df
 
 
 def clean_pandas_df(df, numeric_columns):
-    df = df.fillna('')
+    df = df.fillna("")
 
-    for col in df.columns:
-        df[col] = df[col].astype(str).str.replace('$', '', regex=False).str.replace(',', '', regex=False).str.strip() #Removed the '$', ',' and strip  for easier type conversion
+    for column in df.columns:
+        df[column] = (
+            df[column]
+            .astype(str)
+            .str.replace("$", "", regex=False)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
 
-    df['APC'] = df['APC'].apply(lambda x: x.zfill(4)) #append 3 digits apc code to 4 digits
+    df["APC"] = df["APC"].apply(lambda value: value.zfill(4))
 
-    for col in numeric_columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+    for column in numeric_columns:
+        df[column] = pd.to_numeric(df[column], errors="coerce")
+
     return df
 
-def create_spark_dataframe(spark,spark_schema_original,pandas_df):
-    return spark.createDataFrame(pandas_df, schema=spark_schema_original)
+
+def create_spark_dataframe(spark, original_schema, pandas_df):
+    return spark.createDataFrame(pandas_df, schema=original_schema)
 
 
-def save_original_parquet(df):
-    df.write.mode('overwrite').parquet('./initial_parquet')
-    print("Initial dataframe saved")
+def save_original_parquet(df, output_path):
+    df.write.mode("overwrite").parquet(output_path)
+    print(f"Initial dataframe saved to {output_path}")
 
 
 def load_and_rename(spark, input_path, conversion_dict, final_schema):
-    df = spark.read.parquet(input_path)    
-    # Rename columns using conversion_dict values (new column names)
-    for old_col, new_col in conversion_dict.items():
-        if old_col in df.columns:
-            df = df.withColumnRenamed(old_col, new_col)
-    
-    # Convert data types as per final schema
+    df = spark.read.parquet(input_path)
+
+    for old_column, new_column in conversion_dict.items():
+        if old_column in df.columns:
+            df = df.withColumnRenamed(old_column, new_column)
+
     for field in final_schema.fields:
-        col_name = field.name
-        data_type = field.dataType
-        if col_name in df.columns:
-            df = df.withColumn(col_name, col(col_name).cast(data_type))
-    
+        if field.name in df.columns:
+            df = df.withColumn(
+                field.name,
+                F.col(field.name).cast(field.dataType),
+            )
+
     return df
 
-def save_final_parquet(df):
-    df.write.mode("overwrite").parquet('./final_parquet')
-    print("Final DataFrame saved")
+
+def save_final_parquet(df, output_path):
+    df.write.mode("overwrite").parquet(output_path)
+    print(f"Final dataframe saved to {output_path}")
 
 
 def read_final_parquet(spark, path):
     return spark.read.parquet(path)
 
+
 def test_dataframe(df):
-    apc_check = df.filter(~(col("apc").rlike(r"^\d{4}$")))
-    assert apc_check.count() == 0, "APC codes are not 4-digit numeric"
+    checks = {
+        "APC codes": ("apc", r"^\d{4}$"),
+        "Payment Rate": ("payment_rate", r"^\d+(\.\d{3})?$"),
+        "Minimum Unadjusted Copayment": (
+            "min_unadjusted_copay",
+            r"^\d+(\.\d{2})?$",
+        ),
+        "Adjusted Beneficiary Copayment": (
+            "adj_benefi_copay",
+            r"^\d+(\.\d{2})?$",
+        ),
+    }
 
-    payment_check = df.filter(
-        ~col("payment_rate").cast(StringType()).rlike(r"^\d+(\.\d{3})?$")
-    )
-    assert payment_check.count() == 0, "Payment Rate does not have 3 decimal places"
+    for description, (column_name, pattern) in checks.items():
+        invalid_count = df.filter(
+            F.col(column_name).isNull()
+            | ~F.col(column_name).cast(spark_types.StringType()).rlike(pattern)
+        ).count()
 
-    min_copay_check = df.filter(
-        ~col("min_unadjusted_copay").cast(StringType()).rlike(r"^\d+(\.\d{2})?$")
-    )
-    assert min_copay_check.count() == 0, "Minimum Unadjusted Copayment does not have 2 decimal places"
-
-    adj_copay_check = df.filter(
-        ~col("adj_benefi_copay").cast(StringType()).rlike(r"^\d+(\.\d{2})?$")
-    )
-    assert adj_copay_check.count() == 0, "Adjusted Beneficiary Copayment does not have 2 decimal places"
+        if invalid_count > 0:
+            raise ValueError(f"{description} validation failed: {invalid_count} rows")
 
     print("All tests passed!")
 
+
 def main():
-    use_xlsx=True
-    #REVIEW: usage of file as xls or csv should be passed as param to main while calling the py file
+    config = load_config()
+    source_config = config["source"]
+    paths = config["paths"]
+    use_xlsx = source_config["file_type"].lower() == "xlsx"
+    expected_extension = ".xlsx" if use_xlsx else ".csv"
+
     try:
-        download_file_from_url_and_extract('https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates')
-        # REVIEW:use the url in the config 
-        columns_mapper = load_config()
-        conversion_dict, spark_schema_original, spark_schema_final, pandas_schema, numeric_columns = build_schema(columns_mapper['columns_mapper'])
+        input_file = download_file_from_url_and_extract(
+            source_config["url"],
+            output_dir=paths["download_dir"],
+            expected_extension=expected_extension,
+        )
 
-        pandas_df=read_pandas_df(pandas_schema,numeric_columns,conversion_dict,use_xlsx)
+        schema_config = build_schema(config["columns_mapper"])
+        (
+            conversion_dict,
+            original_schema,
+            final_schema,
+            pandas_schema,
+            numeric_columns,
+        ) = schema_config
 
-        with SparkSession.builder.appName('Addendum A Analytics').getOrCreate() as spark:
-            spark_df=create_spark_dataframe(spark,spark_schema_original,pandas_df)
-            save_original_parquet(spark_df)
-            df_renamed=load_and_rename(spark,'./initial_parquet',conversion_dict,spark_schema_final)
-            save_final_parquet(df_renamed)
-            final_df=read_final_parquet(spark,'./final_parquet')
+        pandas_df = read_pandas_df(
+            input_file,
+            pandas_schema,
+            numeric_columns,
+            conversion_dict,
+            use_xlsx,
+            source_config["skip_rows"],
+        )
 
+        with SparkSession.builder.appName("Addendum A Analytics").getOrCreate() as spark:
+            spark_df = create_spark_dataframe(
+                spark,
+                original_schema,
+                pandas_df,
+            )
+            save_original_parquet(spark_df, paths["initial_output"])
+
+            renamed_df = load_and_rename(
+                spark,
+                paths["initial_output"],
+                conversion_dict,
+                final_schema,
+            )
+            save_final_parquet(renamed_df, paths["final_output"])
+
+            final_df = read_final_parquet(spark, paths["final_output"])
             test_dataframe(final_df)
-    except Exception as e:
-        print(e)  
-    finally:      
-        file_name=[f for f in os.listdir('.') if f.endswith('.csv') or f.endswith('.xlsx')]
-        for file in file_name:
-            os.remove(file)
+    finally:
+        if os.path.exists(paths["download_dir"]):
+            shutil.rmtree(paths["download_dir"])
+
 
 if __name__ == "__main__":
     main()

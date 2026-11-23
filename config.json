@@ -1,4 +1,14 @@
 {
+  "source": {
+    "url": "https://www.cms.gov/medicare/payment/prospective-payment-systems/hospital-outpatient-pps/quarterly-addenda-updates",
+    "file_type": "xlsx",
+    "skip_rows": 2
+  },
+  "paths": {
+    "download_dir": "downloaded_input",
+    "initial_output": "initial_parquet",
+    "final_output": "final_parquet"
+  },
   "columns_mapper": [
     {
       "source_col_name": "APC",
